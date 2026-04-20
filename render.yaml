@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: sofin-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: CORS_ORIGIN
+        value: http://localhost:5173,https://sofin-group.vercel.app
+      - key: SCRAPE_SOURCE
+        value: https://genk.vn/ai.chn
+      - key: SCRAPE_TARGET
+        value: 100
+      - key: SCRAPE_MAX_PAGES
+        value: 10
+      - key: CACHE_TTL_MS
+        value: 300000
+      - key: DETAIL_CACHE_TTL_MS
+        value: 1800000
