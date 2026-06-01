@@ -1,6 +1,7 @@
 const axios = require('axios')
 const cheerio = require('cheerio')
 const crypto = require('crypto')
+const { pickLargestFromSrcset, upgradeImageUrl } = require('../lib/imageUtils')
 
 const SOURCE_URL = process.env.SCRAPE_SOURCE || 'https://genk.vn/ai.chn'
 const TARGET_COUNT = Number(process.env.SCRAPE_TARGET) || 100
@@ -28,38 +29,6 @@ function deriveCategory(sourceUrl, text) {
 
 function hashId(input) {
   return crypto.createHash('md5').update(input).digest('hex').slice(0, 12)
-}
-
-function pickLargestFromSrcset(srcset) {
-  if (!srcset) return ''
-  let best = { url: '', width: 0 }
-  for (const part of srcset.split(',')) {
-    const m = part.trim().match(/(\S+)\s+(\d+)w/)
-    if (m) {
-      const w = parseInt(m[2], 10)
-      if (w > best.width) best = { url: m[1], width: w }
-    }
-  }
-  return best.url
-}
-
-// mediacdn.vn (GenK/CafeF/...) embeds resize hints like /thumb_w/240/, /thumb/350x175/, /zoom/400_220/
-// Remove them so the CDN returns the full-size original.
-function upgradeImageUrl(url) {
-  if (!url) return url
-  let out = url
-  out = out.replace(/\/thumb_w\/\d+\//i, '/')
-  out = out.replace(/\/thumb\/\d+x\d+\//i, '/')
-  out = out.replace(/\/zoom\/\d+[x_]\d+\//i, '/')
-  out = out.replace(/\/resize\/\d+x\d+\//i, '/')
-  try {
-    const u = new URL(out)
-    for (const p of ['w', 'h', 'width', 'height', 'quality', 'resize']) {
-      u.searchParams.delete(p)
-    }
-    out = u.toString()
-  } catch { /* non-URL, keep as-is */ }
-  return out
 }
 
 function pickBestImage($el) {

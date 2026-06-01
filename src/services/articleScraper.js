@@ -1,5 +1,6 @@
 const axios = require('axios')
 const cheerio = require('cheerio')
+const { pickLargestFromSrcset, upgradeImageUrl } = require('../lib/imageUtils')
 
 const AXIOS_CFG = {
   headers: {
@@ -12,36 +13,6 @@ const AXIOS_CFG = {
 
 function cleanText(t) {
   return (t || '').replace(/\s+/g, ' ').trim()
-}
-
-function pickLargestFromSrcset(srcset) {
-  if (!srcset) return ''
-  let best = { url: '', width: 0 }
-  for (const part of srcset.split(',')) {
-    const m = part.trim().match(/(\S+)\s+(\d+)w/)
-    if (m) {
-      const w = parseInt(m[2], 10)
-      if (w > best.width) best = { url: m[1], width: w }
-    }
-  }
-  return best.url
-}
-
-function upgradeImageUrl(url) {
-  if (!url) return url
-  let out = url
-  out = out.replace(/\/thumb_w\/\d+\//i, '/')
-  out = out.replace(/\/thumb\/\d+x\d+\//i, '/')
-  out = out.replace(/\/zoom\/\d+[x_]\d+\//i, '/')
-  out = out.replace(/\/resize\/\d+x\d+\//i, '/')
-  try {
-    const u = new URL(out)
-    for (const p of ['w', 'h', 'width', 'height', 'quality', 'resize']) {
-      u.searchParams.delete(p)
-    }
-    out = u.toString()
-  } catch { /* non-URL, keep as-is */ }
-  return out
 }
 
 function absolutizeImages($, $body, origin) {
@@ -68,6 +39,59 @@ function absolutizeImages($, $body, origin) {
   })
 }
 
+// Các selector phổ biến cho phần thân bài (nhiều site VN)
+const BODY_SELECTORS = [
+  '#news-bodyhtml',
+  '.bodytext',
+  '.knc-content',
+  '[itemprop="articleBody"]',
+  '.detail-content',
+  '.article-content',
+  '.article-body',
+  '.articleBody',
+  '.entry-content',
+  '.post-content',
+  '.content-detail',
+  '.news-content',
+  '.fck_detail',
+  '#main-detail-body',
+  '.cms-body',
+  '.the-article-body',
+  '.singular-content',
+]
+
+const SAPO_SELECTORS = [
+  'h2.knc-sapo',
+  '.knc-sapo',
+  '.kbwcms-sapo',
+  '.sapo',
+  '.article-sapo',
+  '.detail-sapo',
+  '.post-excerpt',
+  '.bodytext-intro',
+  '.news-sapo',
+]
+
+// Tìm phần thân bài: ưu tiên selector đã biết, nếu không khớp thì
+// tự động dò phần tử chứa nhiều thẻ <p> trực tiếp nhất.
+function findArticleBody($) {
+  for (const sel of BODY_SELECTORS) {
+    const el = $(sel).first()
+    if (el.length && el.find('p').length >= 2) return el
+  }
+  let best = null
+  let bestCount = 0
+  $('div, article, section').each((_i, el) => {
+    const $el = $(el)
+    const count = $el.children('p').length
+    if (count > bestCount) {
+      bestCount = count
+      best = $el
+    }
+  })
+  return best && bestCount >= 3 ? best : $('[___none___]')
+}
+
 async function scrapeArticle(url) {
   const { data: html } = await axios.get(url, AXIOS_CFG)
   const $ = cheerio.load(html)
@@ -79,11 +103,11 @@ async function scrapeArticle(url) {
     ''
 
   const sapo =
-    cleanText($('h2.knc-sapo, .knc-sapo, .kbwcms-sapo, .sapo').first().text()) ||
+    cleanText($(SAPO_SELECTORS.join(', ')).first().text()) ||
     $('meta[property="og:description"]').attr('content') ||
     ''
 
-  const $body = $('.knc-content, [itemprop="articleBody"], .detail-content').first()
+  const $body = findArticleBody($)
 
   let contentHtml = ''
   let contentText = ''
@@ -101,8 +125,7 @@ async function scrapeArticle(url) {
 
     $body.find('img[src]').each((_i, el) => {
       const src = $(el).attr('src')
-      const caption = cleanText($(el).closest('figure, .VCSortableInPreviewMode').find('figcaption, .PhotoCMS_Caption').text())
-      if (src) images.push({ src, caption })
+      if (src && !images.includes(src)) images.push(src)
     })
 
     contentHtml = $body.html()?.trim() || ''
@@ -111,7 +134,7 @@ async function scrapeArticle(url) {
 
   const mainImage =
     $('meta[property="og:image"]').attr('content') ||
-    (images[0] && images[0].src) ||
+    images[0] ||
     ''
 
   const tags = $('meta[property="article:tag"], meta[name="keywords"]')

@@ -1,6 +1,8 @@
 const express = require('express')
 const { scrapeNews } = require('../services/newsScraper')
 const { scrapeArticle } = require('../services/articleScraper')
+const { parsePositiveInt } = require('../lib/pagination')
+const { getCachedDetail } = require('../lib/caching')
 
 const router = express.Router()
 
@@ -16,12 +18,6 @@ async function getItems() {
     cache = { items, expiresAt: now + CACHE_TTL }
   }
   return cache.items
-}
-
-function parsePositiveInt(value, fallback, max) {
-  const n = Number.parseInt(value, 10)
-  if (!Number.isFinite(n) || n < 1) return fallback
-  return max ? Math.min(n, max) : n
 }
 
 router.get('/', async (req, res, next) => {
@@ -66,18 +62,7 @@ router.get('/:id', async (req, res, next) => {
         .json({ success: false, message: 'News not found', data: null })
     }
 
-    const now = Date.now()
-    const cached = detailCache.get(item.id)
-    let detail = cached && cached.expiresAt > now ? cached.data : null
-
-    if (!detail) {
-      try {
-        detail = await scrapeArticle(item.url)
-        detailCache.set(item.id, { data: detail, expiresAt: now + DETAIL_TTL })
-      } catch {
-        detail = null
-      }
-    }
+    const detail = await getCachedDetail(item.id, item.url, detailCache, DETAIL_TTL, scrapeArticle)
 
     res.json({
       success: true,
