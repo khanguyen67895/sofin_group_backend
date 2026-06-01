@@ -27,11 +27,33 @@ function randomName(ext) {
 // Lưu file trong RAM rồi đẩy lên Cloudinary (hoặc ghi xuống đĩa khi chưa cấu hình)
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: 20 },
+  limits: { files: 10 },
   fileFilter(_req, file, cb) {
     cb(null, ALLOWED_MIME.includes(file.mimetype))
   },
 })
+
+// Bọc middleware multer để chuyển MulterError thành lỗi 400 có message rõ ràng
+function runMulter(mw) {
+  return (req, res, next) => {
+    mw(req, res, (err) => {
+      if (!err) return next()
+      if (err instanceof multer.MulterError) {
+        const messages = {
+          LIMIT_FILE_SIZE: 'File vượt quá 5MB',
+          LIMIT_FILE_COUNT: 'Vượt quá số file cho phép (tối đa 10)',
+          LIMIT_UNEXPECTED_FILE: `Sai tên field upload: "${err.field}". Vui lòng dùng field "files"`,
+        }
+        return res.status(400).json({
+          success: false,
+          message: messages[err.code] || `Lỗi upload: ${err.message}`,
+          data: null,
+        })
+      }
+      next(err)
+    })
+  }
+}
 
 function publicUrl(req, filename) {
   const base = process.env.APP_URL || `${req.protocol}://${req.get('host')}`
@@ -67,7 +89,7 @@ async function storeFromUrl(req, url) {
 }
 
 // POST /api/admin/upload — 1 ảnh (field: file)
-router.post('/', upload.single('file'), async (req, res, next) => {
+router.post('/', runMulter(upload.single('file')), async (req, res, next) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'Không có file', data: null })
@@ -81,7 +103,7 @@ router.post('/', upload.single('file'), async (req, res, next) => {
 
 // POST /api/admin/upload/multiple
 // Chấp nhận file upload (field: files) VÀ/HOẶC URL (field: urls — JSON array hoặc string)
-router.post('/multiple', upload.array('files', 20), async (req, res, next) => {
+router.post('/multiple', runMulter(upload.any()), async (req, res, next) => {
   try {
     const results = []
 
